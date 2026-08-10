@@ -1,0 +1,77 @@
+---
+- name: Deploy employees API
+  hosts: servers
+  become: true
+  gather_facts: false
+
+  vars:
+    api_image: somkiat/employees-api:3.0
+    api_container_name: employees-api
+    api_host_port: 3000
+    api_container_port: 3000
+    database_url: ""
+    api_environment: >-
+      {{
+        {'PORT': api_container_port | string}
+        | combine(
+            {'DATABASE_URL': database_url}
+            if database_url | length > 0
+            else {}
+          )
+      }}
+
+  tasks:
+    - name: Gather Docker containers and volumes
+      community.docker.docker_host_info:
+        containers: true
+        containers_all: true
+        volumes: true
+      register: docker_host_info
+
+    - name: Remove all Docker containers
+      community.docker.docker_container:
+        name: "{{ item.Id }}"
+        state: absent
+        force_kill: true
+      loop: "{{ docker_host_info.containers | default([]) }}"
+      loop_control:
+        label: "{{ item.Names | default([item.Id]) | first }}"
+
+    - name: Remove all Docker volumes
+      community.docker.docker_volume:
+        name: "{{ item.Name }}"
+        state: absent
+      loop: "{{ docker_host_info.volumes | default([]) }}"
+      loop_control:
+        label: "{{ item.Name }}"
+
+    - name: Verify API port is free before deployment
+      ansible.builtin.wait_for:
+        host: 127.0.0.1
+        port: "{{ api_host_port }}"
+        state: stopped
+        timeout: 10
+        msg: "Port {{ api_host_port }} is still in use"
+
+    - name: Pull and start employees API container
+      community.docker.docker_container:
+        name: "{{ api_container_name }}"
+        image: "{{ api_image }}"
+        pull: always
+        state: started
+        restart_policy: unless-stopped
+        published_ports:
+          - "{{ api_host_port }}:{{ api_container_port }}"
+        env: "{{ api_environment }}"
+
+    - name: Wait for employees API port
+      ansible.builtin.wait_for:
+        host: 127.0.0.1
+        port: "{{ api_host_port }}"
+        state: started
+        delay: 1
+        timeout: 30
+
+    - name: Report deployment status
+      ansible.builtin.debug:
+        msg: "{{ api_image }} is running on port {{ api_host_port }}"
