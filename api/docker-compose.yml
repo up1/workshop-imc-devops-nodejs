@@ -1,6 +1,6 @@
 services:
   api:
-    image: somkiat/employees-api:1.0
+    image: somkiat/employees-api:3.0
     build:
       context: .
       dockerfile: Dockerfile
